@@ -45,9 +45,18 @@ df_data = load_dataset()
 # Helpers
 # =========================
 def category_options(prefix="MenuCategory_"):
-    opts = sorted([c.split(prefix, 1)[1] for c in feature_columns if c.startswith(prefix)])
-    if not opts and df_data is not None and "MenuCategory" in df_data.columns:
-        opts = sorted([str(x) for x in df_data["MenuCategory"].dropna().unique()])
+    # Ambil dari feature_columns model
+    opts_model = sorted([c.split(prefix, 1)[1] for c in feature_columns if c.startswith(prefix)])
+
+    # Ambil dari data CSV sesuai allowed_ids
+    opts_data = []
+    if df_data is not None and "MenuCategory" in df_data.columns:
+        opts_data = sorted(
+            df_data[df_data["RestaurantID"].isin(["R001", "R002", "R003"])]["MenuCategory"].dropna().unique()
+        )
+
+    # Gabungkan dan hilangkan duplikat
+    opts = sorted(set(opts_model + opts_data))
     return opts or ["Main Course"]
 
 def build_row(price: float, category: str) -> pd.DataFrame:
