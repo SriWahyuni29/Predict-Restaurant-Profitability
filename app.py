@@ -120,17 +120,6 @@ if predict_btn:
     # Kartu hasil
     st.metric(label="Predicted Profitability", value=pred_label)
 
-    # Tabel ringkas input + hasil (sesuai permintaan)
-    st.dataframe(
-        pd.DataFrame([{
-            "Restaurant ID": restaurant_id,
-            "Price": price,
-            "Menu Category": category,
-            "Predicted Profitability": pred_label
-        }]),
-        use_container_width=True
-    )
-
     # Probabilitas kelas (opsional)
     if hasattr(model, "predict_proba"):
         proba = model.predict_proba(X)[0]
