@@ -45,10 +45,24 @@ df_data = load_dataset()
 # Helpers
 # =========================
 def category_options(prefix="MenuCategory_"):
-    opts = sorted([c.split(prefix, 1)[1] for c in feature_columns if c.startswith(prefix)])
-    if not opts and df_data is not None and "MenuCategory" in df_data.columns:
-        opts = sorted([str(x) for x in df_data["MenuCategory"].dropna().unique()])
-    return opts or ["Main Course"]
+    """Selalu tampilkan 4 kategori utama, meski kolom one-hot di model tidak lengkap."""
+    fixed_categories = ["Appetizers", "Beverages", "Desserts", "Main Course"]
+
+    # dari model (jika ada)
+    opts_model = [c.split(prefix, 1)[1] for c in feature_columns if c.startswith(prefix)]
+
+    # dari data (fallback jaga-jaga)
+    opts_data = []
+    if df_data is not None and "MenuCategory" in df_data.columns:
+        opts_data = [str(x) for x in df_data["MenuCategory"].dropna().unique()]
+
+    # gabungkan & pertahankan urutan fixed
+    opts = []
+    for cat in fixed_categories:
+        if (cat in opts_model) or (cat in opts_data) or (cat in fixed_categories):
+            opts.append(cat)
+
+    return opts
 
 def build_row(price: float, category: str) -> pd.DataFrame:
     row = {c: 0.0 for c in feature_columns}
@@ -81,7 +95,6 @@ with st.container():
     if df_data is not None:
         rid_list = sorted([str(rid) for rid in df_data["RestaurantID"].dropna().unique() if rid in allowed_ids])
         if not rid_list:
-            # fallback jika data tidak berisi ID yang diperbolehkan
             rid_list = allowed_ids
     else:
         rid_list = allowed_ids
