@@ -1,82 +1,85 @@
-import pandas as pd
-import numpy as np
+# train_dt.py
 import joblib
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+import pandas as pd
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.compose import ColumnTransformer
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-import os
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import classification_report
 
-# === Load Data ===
-data = pd.read_csv("UAS/data/restaurant_menu_optimization_data.csv")
+# Load data
+df = pd.read_csv("/mnt/data/restaurant_menu_optimization_data.csv")
 
-# Hitung jumlah bahan di kolom Ingredients
-data['Ingredients_count'] = data['Ingredients'].apply(lambda x: len(eval(x)) if isinstance(x, str) else 0)
+# Pastikan kolom
+# RestaurantID (hanya untuk tampilan, biasanya TIDAK dipakai fitur),
+# MenuCategory (kategorikal), Price (numerik), Profitability (target)
+X = df[["MenuCategory", "Price"]].copy()
+y = df["Profitability"].astype("category")
 
-# Hapus kolom yang tidak diperlukan
-data = data.drop(columns=['Ingredients', 'RestaurantID'])
+# Definisikan 4 kategori yang harus ada (sesuai data kamu)
+menu_categories = ["Appetizers", "Beverages", "Desserts", "Main Course"]
 
-# One-Hot Encoding kategori
-data_encoded = pd.get_dummies(data, columns=['MenuCategory', 'MenuItem'], drop_first=True)
+# Preprocessor
+numeric_features = ["Price"]
+categorical_features = ["MenuCategory"]
 
-# Label Encoding target
-label_encoder = LabelEncoder()
-data_encoded['Profitability'] = label_encoder.fit_transform(data_encoded['Profitability'])
+preprocess = ColumnTransformer(
+    transformers=[
+        ("num", StandardScaler(with_mean=False), numeric_features),
+        ("cat", OneHotEncoder(categories=[menu_categories], handle_unknown="ignore", sparse_output=False), categorical_features),
+    ],
+    remainder="drop",
+    verbose_feature_names_out=False
+)
 
-# Isi missing values pada Price
-data_encoded['Price'].fillna(data_encoded['Price'].mean(), inplace=True)
-
-# Normalisasi fitur numerik
-numerical_features = ['Price', 'Ingredients_count']
-scaler = StandardScaler()
-data_encoded[numerical_features] = scaler.fit_transform(data_encoded[numerical_features])
-
-# Pisah fitur & target
-X = data_encoded.drop('Profitability', axis=1)
-y = data_encoded['Profitability']
-
-# Split train-test
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# === Train Model Decision Tree ===
+# Model
 dt = DecisionTreeClassifier(
     random_state=42,
     max_depth=100,
     min_samples_split=10,
     min_samples_leaf=5,
-    max_features='sqrt'
+    max_features="sqrt"
 )
-dt.fit(X_train, y_train)
-dt_pred = dt.predict(X_test)
 
-print("\nEvaluasi Model Decision Tree:")
-print(classification_report(y_test, dt_pred))
+pipe = Pipeline(steps=[
+    ("prep", preprocess),
+    ("clf", dt)
+])
 
-# Confusion Matrix
-plt.figure(figsize=(8, 6))
-sns.heatmap(confusion_matrix(y_test, dt_pred), annot=True, fmt='d', cmap='Blues')
-plt.title('Confusion Matrix - Decision Tree')
-plt.xlabel('Predicted')
-plt.ylabel('True')
-plt.show()
+# Split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
 
-# Cross-validation
-dt_cv_scores = cross_val_score(dt, X_train, y_train, cv=5)
-print("\nCross-validation scores:", dt_cv_scores)
+# Train
+pipe.fit(X_train, y_train)
 
-# === Simpan Model ===
+# Evaluate
+y_pred = pipe.predict(X_test)
+print("\nDecision Tree Model Evaluation:")
+print(classification_report(y_test, y_pred))
+
+# Siapkan feature_columns agar app.py tahu urutan kolom:
+#    - numeric (Price) + one-hot dari kategori di atas
+ohe = pipe.named_steps["prep"].named_transformers_["cat"]
+ohe_names = [f"MenuCategory_{c}" for c in menu_categories]  # pakai urutan yang ditetapkan
+feature_columns = numeric_features + ohe_names
+
+# class_names mapping (urut sesuai kelas unik y)
+classes = list(y.cat.categories)
+class_names = {i: cls for i, cls in enumerate(classes)}  # kalau model output index, tidak wajib dipakai
+
+# Simpan bundle (model disimpan sebagai pipeline utuh)
 bundle = {
-    "model": dt,
-    "scaler": scaler,
-    "label_encoder": label_encoder,
-    "numerical_features": numerical_features,
-    "feature_columns": X.columns.tolist(),
-    "class_names": {i: label for i, label in enumerate(label_encoder.classes_)}
+    "model": pipe,                       # Pipeline lengkap (prep + clf)
+    "scaler": None,                      # Tidak perlu karena scaler ada di Pipeline
+    "feature_columns": feature_columns,  # Agar app bisa bangun vektor fitur
+    "numerical_features": numeric_features,
+    "class_names": class_names
 }
 
-os.makedirs("model", exist_ok=True)
+Path("model").mkdir(exist_ok=True)
 joblib.dump(bundle, "model/menu_model.joblib")
-print("\nModel disimpan di model/menu_model.joblib")
+print("✅ Saved to model/menu_model.joblib")
