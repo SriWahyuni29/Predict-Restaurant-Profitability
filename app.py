@@ -114,13 +114,6 @@ if predict_btn:
     st.success("Prediction complete.")
     st.metric(label="Predicted Profitability", value=pred_label)
 
-    st.dataframe(pd.DataFrame([{
-        "Restaurant ID": restaurant_id,
-        "Price": price,
-        "Menu Category": category,
-        "Predicted Profitability": pred_label
-    }]), use_container_width=True)
-
     if hasattr(model, "predict_proba"):
         proba = model.predict_proba(X)[0]
         proba_df = pd.DataFrame({
