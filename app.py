@@ -3,7 +3,6 @@ import pandas as pd
 import streamlit as st
 import numpy as np
 from pathlib import Path
-import re
 
 st.set_page_config(page_title="Menu Profitability Predictor", page_icon="🍽️", layout="centered")
 
@@ -37,7 +36,7 @@ bundle = load_bundle()
 model = bundle["model"]
 scaler = bundle.get("scaler", None)
 feature_columns = bundle["feature_columns"]
-numerical_features = bundle.get("numerical_features", ["Price"])
+numerical_features = bundle.get("numerical_features", ["Price"])  # sesuai data
 class_names = bundle.get("class_names", {0: "Low", 1: "Medium", 2: "High"})
 
 df_data = load_dataset()
@@ -45,56 +44,22 @@ df_data = load_dataset()
 # =========================
 # Helpers
 # =========================
-def _norm(s: str) -> str:
-    # normalisasi label: trim, rapikan spasi, casefold
-    s = re.sub(r"\s+", " ", str(s).strip())
-    return s.casefold()
+def category_options(prefix="MenuCategory_"):
+    opts = sorted([c.split(prefix, 1)[1] for c in feature_columns if c.startswith(prefix)])
+    if not opts and df_data is not None and "MenuCategory" in df_data.columns:
+        opts = sorted([str(x) for x in df_data["MenuCategory"].dropna().unique()])
+    return opts or ["Main Course"]
 
-def build_category_lookup(prefix="MenuCategory_"):
-    """
-    Menghasilkan:
-      - options: daftar label kategori untuk dropdown (human-friendly)
-      - label_to_col: mapping dari label dropdown -> nama kolom one-hot di model
-    Menggabungkan kategori dari model (feature_columns) + data (R001-R003) dengan normalisasi
-    sehingga tidak ada kategori yang hilang karena beda kapital/spasi.
-    """
-    # 1) Dari model
-    model_cols = [c for c in feature_columns if c.startswith(prefix)]
-    model_labels = [c[len(prefix):] for c in model_cols]
-    model_norm_to_label = {_norm(l): l for l in model_labels}
-    model_label_to_col = {l: f"{prefix}{l}" for l in model_labels}
-
-    # 2) Dari data (dibatasi R001-R003)
-    data_labels = set()
-    if df_data is not None and "MenuCategory" in df_data.columns and "RestaurantID" in df_data.columns:
-        allowed_ids = {"R001", "R002", "R003"}
-        sub = df_data[df_data["RestaurantID"].astype(str).isin(allowed_ids)]
-        data_labels = {re.sub(r"\s+", " ", str(x).strip()) for x in sub["MenuCategory"].dropna().unique()}
-
-    # 3) Gabungkan dengan normalisasi (hanya ambil yang ada di model agar aman saat one-hot)
-    final_labels = set(model_labels)
-    for dl in data_labels:
-        n = _norm(dl)
-        if n in model_norm_to_label:
-            final_labels.add(model_norm_to_label[n])
-
-    # 4) Siapkan mapping ke kolom feature
-    options = sorted(final_labels)
-    label_to_col = {lbl: model_label_to_col[lbl] for lbl in options if lbl in model_label_to_col}
-    return options, label_to_col
-
-def build_row(price: float, category_label: str, label_to_col: dict) -> pd.DataFrame:
+def build_row(price: float, category: str) -> pd.DataFrame:
     row = {c: 0.0 for c in feature_columns}
     if "Price" in row:
         row["Price"] = float(price)
-    # aktifkan one-hot sesuai kolom model yang tepat
-    cat_col = label_to_col.get(category_label)
-    if cat_col and cat_col in row:
+    cat_col = f"MenuCategory_{category}"
+    if cat_col in row:
         row[cat_col] = 1.0
 
     X = pd.DataFrame([row], columns=feature_columns)
 
-    # scaling aman
     if scaler is not None and numerical_features:
         cols_to_scale = [c for c in numerical_features if c in X.columns]
         if cols_to_scale:
@@ -111,37 +76,30 @@ st.caption("Masukkan **Restaurant ID**, **Price**, dan **Menu Category** untuk m
 with st.container():
     c1, c2, c3 = st.columns([1.2, 1, 1.2])
 
-    # Restaurant ID otomatis dari data, dibatasi ke R001–R003
+    # Restaurant ID otomatis dari data, tapi dibatasi ke tiga ID
     allowed_ids = ["R001", "R002", "R003"]
     if df_data is not None:
         rid_list = sorted([str(rid) for rid in df_data["RestaurantID"].dropna().unique() if rid in allowed_ids])
         if not rid_list:
+            # fallback jika data tidak berisi ID yang diperbolehkan
             rid_list = allowed_ids
     else:
         rid_list = allowed_ids
+
     restaurant_id = c1.selectbox("Restaurant ID", options=rid_list, index=0)
 
-    # Prefill dari data sesuai RestaurantID
+    # Prefill price & category dari baris pertama dengan RestaurantID terpilih
     if df_data is not None:
         pre = df_data[df_data["RestaurantID"] == restaurant_id].head(1)
         default_price = float(pre["Price"].iloc[0]) if not pre.empty else 18.50
-        default_cat_raw = str(pre["MenuCategory"].iloc[0]) if not pre.empty else None
+        default_cat = str(pre["MenuCategory"].iloc[0]) if not pre.empty else None
     else:
-        default_price, default_cat_raw = 18.50, None
-
-    # Build opsi kategori + mapping aman ke kolom model
-    cat_opts, label_to_col = build_category_lookup()
-
-    # Sinkronkan default dari data ke opsi (normalisasi)
-    if default_cat_raw is not None:
-        n = _norm(default_cat_raw)
-        # cari label di cat_opts yang norm-nya sama
-        match = next((lbl for lbl in cat_opts if _norm(lbl) == n), None)
-        default_idx = cat_opts.index(match) if match else 0
-    else:
-        default_idx = 0
+        default_price, default_cat = 18.50, None
 
     price = c2.number_input("Price", min_value=0.0, value=default_price, step=0.50, format="%.2f")
+
+    cat_opts = category_options()
+    default_idx = cat_opts.index(default_cat) if (default_cat in cat_opts) else 0
     category = c3.selectbox("Menu Category", options=cat_opts, index=default_idx)
 
     predict_btn = st.button("Predict", type="primary", use_container_width=True)
@@ -150,7 +108,7 @@ with st.container():
 # Predict & Output
 # =========================
 if predict_btn:
-    X = build_row(price=price, category_label=category, label_to_col=label_to_col)
+    X = build_row(price=price, category=category)
     y = int(model.predict(X)[0])
     pred_label = class_names.get(y, str(y))
 
