@@ -25,9 +25,7 @@ st.title("🍽️ Menu Profitability Predictor")
 def build_row(price, ing_count, cat, item):
     row = {c:0.0 for c in feature_columns}
     if "Price" in row: row["Price"] = float(price)
-    if "Ingredients_count" in row: row["Ingredients_count"] = float(ing_count)
     if f"MenuCategory_{cat}" in row: row[f"MenuCategory_{cat}"] = 1.0
-    if f"MenuItem_{item}" in row: row[f"MenuItem_{item}"] = 1.0
     X = pd.DataFrame([row], columns=feature_columns)
     if numerical_features: X[numerical_features] = scaler.transform(X[numerical_features])
     return X
@@ -37,9 +35,7 @@ def opts(prefix):
 
 col1, col2 = st.columns(2)
 price = col1.number_input("Price", 0.0, value=18.5, step=0.5, format="%.2f")
-ing   = col2.number_input("Ingredients count", 0, value=4, step=1)
 cat = st.selectbox("Menu category", opts("MenuCategory_") or ["Main Course"])
-item= st.selectbox("Menu item", opts("MenuItem_") or ["Chicken Satay"])
 
 if st.button("Predict"):
     X = build_row(price, ing, cat, item)
